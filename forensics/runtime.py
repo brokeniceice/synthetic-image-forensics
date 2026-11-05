@@ -26,7 +26,7 @@ TRAIN_CENTER = -9.190834884678093
 
 
 class Runtime:
-    def __init__(self, config, c1_checkpoint, spatial_bundle=None, device='cuda:0', *, packed_weights=None):
+    def __init__(self, config, c1_checkpoint=None, spatial_bundle=None, device='cuda:0', *, packed_weights=None, complete_package=None):
         self.device = torch.device(device)
         require(self.device.type == 'cuda', 'BF16 inference requires a CUDA device')
         torch.cuda.set_device(self.device)
@@ -37,9 +37,14 @@ class Runtime:
         torch.backends.cudnn.deterministic = True
         self.cfg = copy.deepcopy(config) if isinstance(config, dict) else yaml.safe_load(Path(config).read_text())
         conv.default_conversation = conv.conv_templates['llava_v1']
-        self.model, self.tokenizer, self.identity = load_c1(self.cfg, c1_checkpoint, self.device,
-            rine_payload=packed_weights['rine'] if packed_weights else None,
-            source_hashes=packed_weights['source_hashes'] if packed_weights else None)
+        if complete_package:
+            from forensics.pretrained import load_backbone
+            directory, manifest = complete_package
+            self.model, self.tokenizer, self.identity = load_backbone(self.cfg, directory, manifest, self.device)
+        else:
+            self.model, self.tokenizer, self.identity = load_c1(self.cfg, c1_checkpoint, self.device,
+                rine_payload=packed_weights['rine'] if packed_weights else None,
+                source_hashes=packed_weights['source_hashes'] if packed_weights else None)
         self.owner = self.model.evaluate.__self__
         require(self.owner is self.model.get_base_model(), 'Wrong generation owner')
         require(self.owner.forensic_evidence_token_count == 1 and self.owner.token_strategy == 'fixed_cls_query', 'C1 token strategy drift')
@@ -53,26 +58,35 @@ class Runtime:
         require(getattr(self.base_generation, 'repetition_penalty', 1.0) == 1.0 and getattr(self.base_generation, 'no_repeat_ngram_size', 0) == 0, 'Unexpected repetition constraint')
         self.control_ids = [self.owner.real_token_idx, self.owner.cls_token_idx, self.owner.fake_token_idx]
         require(len(set(self.control_ids)) == 3 and self.owner.seg_token_idx not in self.control_ids and self.tokenizer.eos_token_id not in self.control_ids, 'Invalid suppression tokens')
-        self.spatial_ready = spatial_bundle is not None or packed_weights is not None
+        self.spatial_ready = spatial_bundle is not None or packed_weights is not None or complete_package is not None
         if self.spatial_ready:
-            selected = packed_weights['spatial'] if packed_weights is not None else torch.load(spatial_bundle, map_location='cpu', weights_only=False)
-            require(selected['schema'] == 'paper_spatial_bundle_v1', 'Unknown spatial bundle')
-            require(selected['c1_sha256'] == self.identity['c1_sha256'], 'C1/spatial checkpoint linkage mismatch')
-            expected = json.loads((Path(__file__).resolve().parents[1] / 'configs/paper/protocol.json').read_text())['checkpoint_sha256']
-            require(selected['source_hashes']['r1'] == expected['r1'] and selected['source_hashes']['forensic_source'] == expected['forensic_source'], 'Spatial bundle differs from final NoRelative assets')
+            if complete_package:
+                selected = manifest['spatial_config']
+            else:
+                selected = packed_weights['spatial'] if packed_weights is not None else torch.load(spatial_bundle, map_location='cpu', weights_only=False)
+                require(selected['schema'] == 'paper_spatial_bundle_v1', 'Unknown spatial bundle')
+                require(selected['c1_sha256'] == self.identity['c1_sha256'], 'C1/spatial checkpoint linkage mismatch')
+                expected = json.loads((Path(__file__).resolve().parents[1] / 'configs/paper/protocol.json').read_text())['checkpoint_sha256']
+                require(selected['source_hashes']['r1'] == expected['r1'] and selected['source_hashes']['forensic_source'] == expected['forensic_source'], 'Spatial bundle differs from final NoRelative assets')
             self.utility = CSCULF().to(self.device)
-            self.utility.load_state_dict(selected['utility_state'], strict=True)
             self.rectifier = GeometryAwareSAMRectifier(selected['gamma'], heads=8, locality_sigma=0.25).to(self.device)
-            self.rectifier.load_state_dict(selected['rectifier_state'], strict=True)
             self.sam = FrozenP1SAMPath()
-            self.sam.prompt_encoder.load_state_dict(selected['prompt_encoder'], strict=True)
-            self.sam.mask_decoder.load_state_dict(selected['mask_decoder'], strict=True)
             self.sam.to(device=self.device, dtype=torch.bfloat16)
             self.source = CLIPSpatialArm(blocks=3).to(self.device)
-            self.source.load_state_dict(selected['forensic_source_state'], strict=True)
+            if complete_package:
+                from forensics.pretrained import load_module
+                for name in ('utility', 'rectifier', 'sam', 'source'):
+                    load_module(directory, getattr(self, name), name + '.', self.device)
+            else:
+                self.utility.load_state_dict(selected['utility_state'], strict=True)
+                self.rectifier.load_state_dict(selected['rectifier_state'], strict=True)
+                self.sam.prompt_encoder.load_state_dict(selected['prompt_encoder'], strict=True)
+                self.sam.mask_decoder.load_state_dict(selected['mask_decoder'], strict=True)
+                self.source.load_state_dict(selected['forensic_source_state'], strict=True)
             for module in (self.utility, self.rectifier, self.sam, self.source):
                 module.eval().requires_grad_(False)
-            self.identity['spatial_sources'] = selected['source_hashes']
+            if not complete_package:
+                self.identity['spatial_sources'] = selected['source_hashes']
 
     @torch.inference_mode()
     def classify_many(self, rows, center=TRAIN_CENTER):
@@ -245,6 +259,20 @@ class Runtime:
             directory = Path(snapshot_download(repo_id=str(model_id_or_path), revision=revision,
                                               local_files_only=local_files_only))
         manifest = json.loads((directory / 'config.json').read_text())
+        if manifest.get('format_version') == 2:
+            require(manifest['model_type'] == 'synthetic_image_forensics', 'Unsupported model package')
+            from huggingface_hub import snapshot_download
+            clip = manifest['clip']
+            clip_directory = snapshot_download(repo_id=clip['repo_id'], revision=clip['revision'],
+                allow_patterns=['config.json', 'preprocessor_config.json', 'pytorch_model.bin'],
+                local_files_only=local_files_only)
+            config = copy.deepcopy(manifest['backbone_config'])
+            config['model']['version'] = str(directory)
+            config['model']['vision_tower'] = clip_directory
+            runtime = cls(config, device=device, complete_package=(directory, manifest))
+            runtime.identity['model_package'] = str(directory)
+            runtime.identity['clip'] = clip
+            return runtime
         require(manifest['model_type'] == 'synthetic_image_forensics' and manifest['format_version'] == 1, 'Unsupported model package')
         require(file_sha256(directory / 'forensics.pt') == manifest['weights_sha256'], 'Model package checksum mismatch')
         expected_protocol = json.loads((Path(__file__).resolve().parents[1] / 'configs/paper/protocol.json').read_text())

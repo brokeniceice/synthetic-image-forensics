@@ -1,84 +1,68 @@
 #!/usr/bin/env python3
-"""Maintainer utility: export one self-contained Hugging Face model directory."""
+"""Export complete model shards; load the frozen CLIP encoder separately."""
 import argparse
-import hashlib
+import copy
 import json
-import os
 from pathlib import Path
 import shutil
 import sys
-sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
+
+CLIP = dict(repo_id='openai/clip-vit-large-patch14-336',
+            revision='ce19dc912ca5cd21c8a653c79e251e808ccabcd1')
 
 
-def sha(path):
-    h = hashlib.sha256()
-    with Path(path).open('rb') as handle:
-        for block in iter(lambda: handle.read(8*1024*1024), b''):
-            h.update(block)
-    return h.hexdigest()
-
-
-def copy_asset(source, target):
-    target.parent.mkdir(parents=True, exist_ok=True)
-    # A hard link is a regular file and avoids duplicating immutable local weights.
-    try:
-        os.link(source, target)
-    except OSError:
-        shutil.copy2(source, target)
-
-
-def main():
-    p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--base-model', type=Path, required=True)
-    p.add_argument('--clip', type=Path, required=True)
-    p.add_argument('--c1', type=Path, required=True)
-    p.add_argument('--rine', type=Path, required=True)
-    p.add_argument('--spatial-bundle', type=Path, required=True)
-    p.add_argument('--output', type=Path, required=True)
-    args = p.parse_args()
-    root = Path(__file__).resolve().parents[1]
-    protocol = json.loads((root/'configs/paper/protocol.json').read_text())
-    base_assets = json.loads((root/'configs/paper/base_assets.json').read_text())
-    expected = protocol['checkpoint_sha256']
-    for path, digest in [(args.c1,expected['c1']),(args.rine,expected['rine'])]:
-        if sha(path) != digest:
-            raise ValueError('Wrong selected checkpoint: ' + str(path))
-    for group, directory in [('glamm',args.base_model),('clip',args.clip)]:
-        for filename,digest in base_assets[group].items():
-            if sha(directory/filename) != digest:
-                raise ValueError('Base asset differs from the paper model: ' + filename)
-    import torch
-    import yaml
-    torch.set_num_threads(4)
-    c1 = torch.load(args.c1,map_location='cpu',weights_only=False)
-    rine = torch.load(args.rine,map_location='cpu',weights_only=False)
-    spatial = torch.load(args.spatial_bundle,map_location='cpu',weights_only=False)
-    if spatial['c1_sha256'] != expected['c1'] or spatial['source_hashes']['r1'] != expected['r1'] or spatial['source_hashes']['forensic_source'] != expected['forensic_source']:
-        raise ValueError('Spatial bundle is not the final P1-decoder NoRelative model')
-    args.output.mkdir(parents=True,exist_ok=False)
-    # Preserve all tensor values/dtypes and parameter names. Do not merge LoRA.
-    weights = dict(c1=dict(module=c1['module'],epoch=c1['epoch'],optimizer_step=c1['optimizer_step']),
-                   rine=dict(rine_state_dict=rine['rine_state_dict']),spatial=spatial,
-                   source_hashes=expected)
-    torch.save(weights,args.output/'forensics.pt')
-    for group,directory,target in [('glamm',args.base_model,'base_model'),('clip',args.clip,'clip')]:
-        for filename in base_assets[group]:
-            copy_asset(directory/filename,args.output/target/filename)
-    # Include any additional tokenizer files required by the selected snapshots.
-    for directory,target in [(args.base_model,'base_model'),(args.clip,'clip')]:
-        for file in directory.iterdir():
-            if file.is_file() and file.suffix in ('.json','.txt','.model','.md') and not (args.output/target/file.name).exists():
-                copy_asset(file,args.output/target/file.name)
-    config = yaml.safe_load((root/'configs/c1.yaml').read_text())
-    config['model']['version']='base_model';config['model']['vision_tower']='clip'
-    config['forensics']['rine_checkpoint']='forensics.pt'
-    manifest=dict(model_type='synthetic_image_forensics',format_version=1,
-                  weights_sha256=sha(args.output/'forensics.pt'),protocol=protocol,
-                  backbone_config=config)
-    (args.output/'config.json').write_text(json.dumps(manifest,indent=2)+'\n')
-    shutil.copy2(root/'LICENSE',args.output/'LICENSE')
-    shutil.copy2(root/'NOTICE',args.output/'NOTICE')
-    (args.output/'README.md').write_text('''---
+def export_runtime(runtime, output, shard_bytes=4_000_000_000):
+    from safetensors.torch import save_file
+    from forensics.pretrained import is_clip_weight
+    output = Path(output)
+    output.mkdir(parents=True, exist_ok=False)
+    modules = dict(backbone=runtime.model, utility=runtime.utility,
+                   rectifier=runtime.rectifier, sam=runtime.sam, source=runtime.source)
+    tensors = {}
+    for prefix, module in modules.items():
+        for name, value in module.state_dict().items():
+            key = prefix + '.' + name
+            if not is_clip_weight(key):
+                tensors[key] = value.detach().cpu().contiguous().clone()
+    shards, current, size = [], {}, 0
+    for name, tensor in tensors.items():
+        count = tensor.numel() * tensor.element_size()
+        if current and size + count > shard_bytes:
+            shards.append(current)
+            current, size = {}, 0
+        current[name] = tensor
+        size += count
+    if current:
+        shards.append(current)
+    index = dict(metadata=dict(total_size=sum(t.numel()*t.element_size() for t in tensors.values())), weight_map={})
+    for number, shard in enumerate(shards, 1):
+        filename = f'model-{number:05d}-of-{len(shards):05d}.safetensors'
+        save_file(shard, output / filename, metadata={'format': 'pt'})
+        index['weight_map'].update({name: filename for name in shard})
+        print(json.dumps(dict(shard=number, total=len(shards), file=filename)), flush=True)
+    (output / 'model.safetensors.index.json').write_text(json.dumps(index, indent=2) + '\n')
+    runtime.tokenizer.save_pretrained(output)
+    language = runtime.owner.config.to_dict()
+    language['_name_or_path'] = ''
+    for key in ('mm_vision_tower', 'vision_tower', 'mm_vision_module', 'vision_module'):
+        language[key] = CLIP['repo_id']
+    config = copy.deepcopy(runtime.cfg)
+    config = {key: config[key] for key in ('model', 'loss', 'optimizer')}
+    config['model']['version'] = '.'
+    config['model']['vision_tower'] = CLIP['repo_id']
+    config['model']['vision_pretrained'] = None
+    manifest = dict(model_type='synthetic_image_forensics', format_version=2,
+        clip=CLIP, backbone_config=config, language_config=language,
+        generation_config=runtime.owner.generation_config.to_dict(),
+        spatial_config=dict(gamma=float(runtime.rectifier.rectification.gamma.detach().cpu())))
+    # Gamma is restored from its tensor; this value only constructs the module.
+    (output / 'config.json').write_text(json.dumps(manifest, indent=2) + '\n')
+    for name in ('LICENSE', 'NOTICE'):
+        shutil.copy2(ROOT / name, output / name)
+    (output / 'README.md').write_text('''---
 language:
 - en
 tags:
@@ -89,30 +73,47 @@ tags:
 ---
 # Synthetic Image Forensics
 
-Frozen C1 + P1 SAM decoder + NoRelative R1 model package. Downloading this
-repository provides all inference weights; manual checkpoint assembly is not
-required. Install the matching code from
-https://github.com/brokeniceice/synthetic-image-forensics .
+Complete model weights for synthetic-image classification, artifact localization
+and explanation generation. Install the code and dependencies from
+[GitHub](https://github.com/brokeniceice/synthetic-image-forensics).
 
-```python
-from forensics.runtime import Runtime
-runtime = Runtime.from_pretrained("LOCAL_DIRECTORY_OR_THIS_REPOSITORY_ID")
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/infer.py \\
+  --model broken-ice/synthetic-image-forensics \\
+  --task classification --image path/to/image.png \\
+  --output outputs/classification
 ```
 
-The package contains the selected GLaMM base and tokenizer, CLIP tower, and
-one combined file containing the unchanged C1, RINE and spatial tensors.
-LoRA remains a separate computation to preserve the BF16 inference results.
-Classification uses the fixed TRAIN center; localization uses known-Fake G1
-with 400 continuation tokens; explanation uses autonomous G0 with 512 tokens.
-Exact provenance and evaluation settings are in config.json.
+Choose `classification`, `localization` or `explanation` with `--task`.
+Localization assumes a synthetic input image. Use a new output directory.
+For multiple images, replace `--image ...` with `--manifest data/images.jsonl`.
+Manifest records contain `sample_id` and `image_path`; see the GitHub README
+for data formats, evaluation and training commands.
 
-Source code, base weights and other upstream assets retain their respective
-licenses. See LICENSE and NOTICE. This package contains no dataset images,
-reference annotations, optimizer state or training logs.
+The model downloads `openai/clip-vit-large-patch14-336` automatically at the
+revision specified in `config.json`. CLIP is cached separately and is not
+included in these weight shards. All other model components are included;
+no base-model or adapter checkpoint assembly is required.
+
+`--model` also accepts a downloaded model directory. Once both the model and
+CLIP are cached, use `--local-files-only` to run offline.
+
+See LICENSE and NOTICE for licensing and attribution.
 ''')
-    files=[p for p in args.output.rglob('*') if p.is_file()]
-    print(json.dumps(dict(output=str(args.output),files=len(files),bytes=sum(p.stat().st_size for p in files),weights_sha256=manifest['weights_sha256'])),flush=True)
+    return dict(output=str(output), tensors=len(tensors), shards=len(shards),
+                weight_bytes=index['metadata']['total_size'])
 
 
-if __name__=='__main__':
+def main():
+    p = argparse.ArgumentParser(description=__doc__)
+    p.add_argument('--model', required=True, help='Model repository ID or local package')
+    p.add_argument('--output', type=Path, required=True)
+    p.add_argument('--device', default='cuda:0')
+    args = p.parse_args()
+    from forensics.runtime import Runtime
+    runtime = Runtime.from_pretrained(args.model, device=args.device)
+    print(json.dumps(export_runtime(runtime, args.output)), flush=True)
+
+
+if __name__ == '__main__':
     main()

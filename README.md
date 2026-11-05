@@ -18,7 +18,7 @@ pip install -r requirements.txt
 
 ## Inference
 
-The model is downloaded automatically from [Hugging Face](https://huggingface.co/broken-ice/synthetic-image-forensics). No separate checkpoint assembly is needed.
+The complete model is downloaded automatically from [Hugging Face](https://huggingface.co/broken-ice/synthetic-image-forensics). Its frozen CLIP encoder is downloaded separately from `openai/clip-vit-large-patch14-336` at the version specified in the model configuration. Both are cached automatically; no separate checkpoint assembly is needed.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python scripts/infer.py \
@@ -50,7 +50,7 @@ CUDA_VISIBLE_DEVICES=0 python scripts/infer.py \
   --output outputs/explanation
 ```
 
-`--model` also accepts a downloaded model directory. Use `--revision` to select a model commit or tag, and `--local-files-only` to use cached files.
+`--model` also accepts a downloaded model directory. Use `--revision` to select a model commit or tag. Once both the model and CLIP have been downloaded, use `--local-files-only` to run from the local cache.
 
 ## Evaluation
 

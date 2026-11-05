@@ -208,7 +208,7 @@ class GLaMMForCausalLM(LlavaLlamaForCausalLM):
         self.register_buffer("seg_count_mismatch_total", torch.zeros((), dtype=torch.long), persistent=False)
         self.post_init()
 
-    def enable_rine_conditioning(self, rine_checkpoint, *, projector_dtype=None):
+    def enable_rine_conditioning(self, rine_checkpoint=None, *, projector_dtype=None):
         """Install the frozen selected model RINE-Q2 branch and trainable C1 heads.
 
         The existing CLIP tower is shared (and remains frozen); RINE performs a
@@ -226,8 +226,9 @@ class GLaMMForCausalLM(LlavaLlamaForCausalLM):
         )
         vision = self.get_vision_tower().vision_tower
         self.rine_conditioner = RINEOnHFCLIP(vision)
-        payload = rine_checkpoint if isinstance(rine_checkpoint, dict) else torch.load(rine_checkpoint, map_location="cpu", weights_only=False)
-        self.rine_conditioner.rine.load_state_dict(payload["rine_state_dict"], strict=True)
+        if rine_checkpoint is not None:
+            payload = rine_checkpoint if isinstance(rine_checkpoint, dict) else torch.load(rine_checkpoint, map_location="cpu", weights_only=False)
+            self.rine_conditioner.rine.load_state_dict(payload["rine_state_dict"], strict=True)
         self.rine_conditioner.requires_grad_(False)
         self.rine_conditioner.eval()
         if projector_dtype is not None:
