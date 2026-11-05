@@ -1,4 +1,4 @@
-# Install the CUDA-matched torch/torchvision and mmcv-full first; see docs/SETUP.md.
+# Install the CUDA-matched torch/torchvision and mmcv-full first; see README.md.
 transformers @ git+https://github.com/huggingface/transformers.git@cae78c46d658a8e496a815c2ee49b9b178fb9c9a
 accelerate==0.25.0
 deepspeed==0.12.5
