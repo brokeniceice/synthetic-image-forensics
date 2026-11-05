@@ -1,0 +1,20 @@
+{
+  "glamm": {
+    "added_tokens.json": "2108af5776e80b76b628346a6e86c583543a90febb0ac9ddf986acec8d5f8988",
+    "config.json": "266a6697e604294f3cccc0fbd4196c99b1a832269aab9fa88b52ab9ca240ede1",
+    "generation_config.json": "894984d6a6417f982b479eaa6953b33b7d4578142252ac2fca8ac866eee62892",
+    "pytorch_model-00001-of-00002.bin": "5dcdc7b329c5aaf02265d2eff7bdec0cc64418c0ef2310f567b442af11ce2f89",
+    "pytorch_model-00002-of-00002.bin": "04c6e1fda509b04b701ee021ba81cef0240451d138367c51bd6658482704419f",
+    "pytorch_model.bin.index.json": "808b0081a99b019de3bb3c06a83ca016386731e388a50b7707570e9761b39f2f",
+    "special_tokens_map.json": "719833ff26ac897a3ec8ed946028a135de2a351470af59b4008744ab1f0ee9b7",
+    "tokenizer.model": "9e556afd44213b6bd1be2b850ebbbd98f5481437a8021afaf58ee7fb1818d347",
+    "tokenizer_config.json": "0274492ad9e91c8bb3d27e79fa678390c6df796abaab0fee9e8a95b7d26d0ab4"
+  },
+  "clip": {
+    "config.json": "51b1c14aabcdf639c4a0370eeda1010b773bbe1df78319c7d0f5882c22ac0ac0",
+    "merges.txt": "f526393189112391ce6f9795d4695f704121ce452c3aad1f5335cc41337eba85",
+    "preprocessor_config.json": "d253881f65322dc546df59cf925a408e5538b8ecb5a1b496cdd36af9992686d4",
+    "pytorch_model.bin": "c6032c2e0caae3dc2d4fba35535fa6307dbb49df59c7e182b1bc4b3329b81801",
+    "special_tokens_map.json": "f8c0d6c39aee3f8431078ef6646567b0aba7f2246e9c54b8b99d55c22b707cbf"
+  }
+}

@@ -1,0 +1,16 @@
+This project builds upon the following upstream implementations. Existing
+copyright and license headers in source files are retained.
+
+GLaMM: https://github.com/mbzuai-oryx/groundingLMM
+LLaVA: https://github.com/haotian-liu/LLaVA
+Segment Anything: https://github.com/facebookresearch/segment-anything
+RINE: https://github.com/mever-team/rine
+  The adapted RINE topology records upstream commit
+  9b7fd5857cc205d0412be6aeee0d7611b95bd620 in model/rine_on_c1.py.
+MMDetection: https://github.com/open-mmlab/mmdetection
+  The inherited vendored package reports version 2.22.0.
+
+Project-specific code is provided under the root Apache-2.0 license.
+Upstream components, pretrained model weights, and datasets remain subject
+to their respective licenses and terms. This notice does not grant rights
+to redistribute third-party weights or datasets.

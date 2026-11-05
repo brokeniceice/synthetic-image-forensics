@@ -1,0 +1,5 @@
+{
+  "tf_minimal_context_template": "Artifact evidence: [SEG]",
+  "mask_logit_threshold": 0.0,
+  "content_groups": ["human", "animal", "object", "scene"]
+}

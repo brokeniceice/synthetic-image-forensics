@@ -1,0 +1,119 @@
+{
+  "model": "C1 + frozen P1 SAM + NoRelative R1",
+  "seed": 3407,
+  "checkpoint_sha256": {
+    "c1": "85af4e0c1b05705a948e106035d15197bdd9164f9e15f838b4c7166cb132c6ff",
+    "rine": "5286b05c82416e3a11d067b1f449b566c39360ffe7133499d09aecd0fcb3b562",
+    "p1": "fa4856f8c173c300050c3ae2149354e63a52bbced762d83fe518e9666136b326",
+    "r1": "847eb2084908442140fbaa894c1f95057bb7cf4968f2a0a888bb7d5b33c7dbff",
+    "forensic_source": "725dd44e0c867360e7a963eb13d8312187fff185849bd52de6b78d4b27a078f7"
+  },
+  "classification": {
+    "prompt": "Determine whether this image is authentic and explain the forensic evidence.",
+    "batch_size": 8,
+    "precision": "BF16, frozen RINE FP32",
+    "margin": "(Fake logit - Real logit) in native BF16, then FP32",
+    "train_center": -9.190834884678093,
+    "comparison": "strictly greater than center",
+    "train_n": 17672
+  },
+  "localization": {
+    "condition": "G1 known-Fake",
+    "max_new_tokens": 400,
+    "suppress": [
+      "[REAL]",
+      "[CLS]",
+      "[FAKE]"
+    ],
+    "missing_seg": "append exactly one SEG only when no natural SEG; replay causal predictor",
+    "mask_union": "max of per-query logits at original image size",
+    "threshold_logit": 0.0,
+    "sam": "frozen P1 prompt encoder and mask decoder",
+    "r1": "NoRelative_s3407, joint epoch 8"
+  },
+  "explanation": {
+    "condition": "E03 autonomous G0; no GT verdict prefix or control-token suppression",
+    "max_new_tokens": 512,
+    "prompt": "Determine whether this image is real or synthetic. Explain the visible evidence in English, describing any synthetic artifacts and their locations. If synthetic artifacts are present, mask them.",
+    "css_model": "sentence-transformers/paraphrase-MiniLM-L6-v2",
+    "css_revision": "c9a2bfebc254878aee8c3aca9e6844d5bbb102d1",
+    "css_max_tokens": 128,
+    "css_pooling": "attention-mask mean; L2-normalized cosine",
+    "rouge": "lowercase ASCII alphanumeric LCS F1; no stemming",
+    "empty": "CSS=0, ROUGE-L=0"
+  },
+  "expected_results": {
+    "classification": {
+      "internal": {
+        "n": 2208,
+        "accuracy": 0.9918478260869565,
+        "f1": 0.9919064748201439
+      },
+      "aigi_holmes": {
+        "n": 99999,
+        "accuracy": 0.9082890828908289,
+        "f1": 0.8995013971837159
+      },
+      "genimage": {
+        "n": 100000,
+        "accuracy": 0.8094,
+        "f1": 0.7699290232243735
+      },
+      "loki": {
+        "n": 2217,
+        "accuracy": 0.7180875056382499,
+        "f1": 0.7341556784347086
+      }
+    },
+    "localization": {
+      "synthscars": {
+        "n": 1000,
+        "mean_foreground_iou": 0.3237024987847758,
+        "mean_foreground_f1": 0.4450306638049648,
+        "global_foreground_iou": 0.3451096543204319,
+        "global_foreground_f1": 0.5131323728321406,
+        "mean_fg_bg_miou": 0.6202441151336723,
+        "global_fg_bg_miou": 0.6338007099212256
+      },
+      "loki": {
+        "n": 229,
+        "mean_foreground_iou": 0.14709380472521513,
+        "mean_foreground_f1": 0.22870212452261338,
+        "global_foreground_iou": 0.14556319254633132,
+        "global_foreground_f1": 0.25413385048235854,
+        "mean_fg_bg_miou": 0.4352490302565985,
+        "global_fg_bg_miou": 0.42650302186399874
+      },
+      "xaigd": {
+        "n": 2419,
+        "mean_foreground_iou": 0.10866018984794605,
+        "mean_foreground_f1": 0.15953306298848138,
+        "global_foreground_iou": 0.09807523344607601,
+        "global_foreground_f1": 0.17863117290841304,
+        "mean_fg_bg_miou": 0.48274072033053284,
+        "global_fg_bg_miou": 0.48219176187829615
+      },
+      "pal4vst": {
+        "n": 1441,
+        "mean_foreground_iou": 0.104945057008913,
+        "mean_foreground_f1": 0.1550442907940741,
+        "global_foreground_iou": 0.116772720005784,
+        "global_foreground_f1": 0.20912530887247893,
+        "mean_fg_bg_miou": 0.5082468437357727,
+        "global_fg_bg_miou": 0.522978121639318
+      }
+    },
+    "explanation": {
+      "synthscars": {
+        "n": 1000,
+        "css": 0.7056825845763087,
+        "rouge_l_f1": 0.3980486238474837
+      },
+      "loki": {
+        "n": 229,
+        "css": 0.20281356804512082,
+        "rouge_l_f1": 0.09734759670312561
+      }
+    }
+  }
+}

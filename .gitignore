@@ -1,0 +1,29 @@
+# Private credentials and local configuration
+.env
+.env.*
+*.key
+*_api_key*
+/secrets/
+# Weights, data and generated runs
+/checkpoints/
+/checkpoints_stage*/
+/datasets/
+/data/
+/cache/
+/outputs/
+*.pt
+*.pth
+*.ckpt
+*.bin
+*.safetensors
+# Development and manuscript artifacts
+/paper/
+/AGENTS.md
+/.codex/
+/.vscode/
+/.pytest_cache/
+__pycache__/
+*.py[cod]
+*.log
+*.tmp
+*.zip

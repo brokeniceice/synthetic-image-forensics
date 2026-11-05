@@ -1,0 +1,135 @@
+experiment:
+  name: phase2a_unified_baseline_full
+  output_dir: outputs/phase2a_unified_baseline_full
+  seed: 3407
+  status: preregistered_not_started
+
+architecture:
+  model: GLaMM
+  token_strategy: fixed_cls_query
+
+model:
+  version: checkpoints/GLaMM-FullScope
+  vision_tower: openai/clip-vit-large-patch14-336
+  vision_pretrained: null
+  pretrained: true
+  token_strategy: fixed_cls_query
+  model_max_length: 1536
+  image_size: 1024
+  out_dim: 256
+  precision: bf16
+  lora_r: 8
+  lora_alpha: 16
+  lora_dropout: 0.05
+  lora_target_modules: q_proj,v_proj
+  train_mask_decoder: true
+  freeze_region_encoder: true
+
+forensics:
+  unified_training: true
+  canonical_unified_prompt: "Determine whether this image is authentic and explain the forensic evidence."
+  canonical_prompt_id: unified_forensics_v1
+  canonical_prompt_sha256: 32f0856f718fb3e19f34b552892636fb6c2613adbae4afb8826dea89f670654d
+  fake_grammar: "[CLS] [FAKE] <artifact explanation> [SEG]"
+  real_grammar: "[CLS] [REAL] No identifiable synthetic artifact evidence is detected."
+
+data:
+  manifest_dir: outputs/data_audits/unified_forensics_split_v1
+  datasets_root: datasets
+  synthscars_root: datasets/SynthScars
+  frozen_split: true
+  hyperparameter_selection_split: val
+  prohibited_selection_splits: [test, external_synthscars_test, RAISE, LOKI]
+
+trainable:
+  llm_base: false
+  vision_tower: false
+  mm_projector: false
+  grounding_encoder: false
+  region_encoder: false
+  lora: true
+  classification_head: true
+  text_hidden_fcs: true
+  mask_decoder: true
+  embeddings: true
+  lm_head: true
+
+optimizer:
+  name: AdamW
+  lora_lr: 0.0003
+  classification_head_lr: 0.0003
+  text_hidden_fcs_lr: 0.0003
+  mask_decoder_lr: 0.0003
+  embedding_lr: 0.0003
+  lm_head_lr: 0.0003
+  betas: [0.9, 0.95]
+  weight_decay: 0.0
+  gradient_clip_norm: 1.0
+
+training:
+  epochs: 10
+  optimizer_steps_per_epoch: 500
+  total_optimizer_steps: 5000
+  # Explicitly approved single-GPU continuation after step 1000.
+  # 10 samples x 1 rank x 2 accumulation = effective global batch 20.
+  batch_size_per_device: 10
+  gradient_accumulation_steps: 2
+  scheduler: linear_warmup_decay
+  warmup_steps: 100
+
+loss:
+  text_weight: 1.0
+  classification_weight: 1.0
+  mask_bce_weight: 2.0
+  mask_dice_weight: 0.5
+  consistency_weight: 0.0
+  seg_token_weight: 0.0
+  per_sample_text_loss_normalization: false
+
+text_loss:
+  normalization: token_mean
+  ignore_index: -100
+
+mask_loss:
+  bce_weight: 2.0
+  dice_weight: 0.5
+  fake_only: true
+
+classification_loss:
+  weight: 1.0
+
+features:
+  npr: false
+  srm: false
+  forensic_fusion: none
+  consistency_loss: 0.0
+  seg_token_loss: 0.0
+  artifact_head: false
+  known_fake_auxiliary: false
+  prompt_diversity_training: false
+
+validation:
+  total_loss_formula: text+classification+weighted_fake_mask_bce+weighted_fake_mask_dice
+  record_detection_metrics: true
+  record_lm_verdict_metrics: true
+  record_cls_lm_agreement: true
+  record_tf_full_context_localization: true
+  g0_g1_generation_frequency: low
+
+checkpoint:
+  output_root: checkpoints/phase2a_unified_baseline/single
+  save_last: true
+  save_best: true
+  primary_best_metric: val_total_loss
+  mode: min
+  use_test_for_selection: false
+  use_loki_for_selection: false
+
+evaluation:
+  default_gt_authenticity_conditioned_localization: G1
+  g0_prompt: canonical_unified
+  g1_prompt: canonical_unified_plus_structural_fake_prefix
+  joint_prompt: canonical_unified
+  max_new_tokens: 400
+
+seed: 3407
