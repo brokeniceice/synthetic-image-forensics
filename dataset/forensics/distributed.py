@@ -13,7 +13,7 @@ class BalancedDistributedForensicsSampler(Sampler[int]):
 
     Every local micro-batch of size two is one Real plus one Fake. Across an
     epoch, each source row appears on exactly one rank when both class counts
-    are divisible by ``num_replicas`` (true for the frozen Phase 2A split).
+    are divisible by ``num_replicas`` (true for the frozen selected model split).
     """
 
     def __init__(self, dataset, *, num_replicas: int, rank: int, seed: int = 0,
@@ -30,7 +30,7 @@ class BalancedDistributedForensicsSampler(Sampler[int]):
         self.fake_indices = [i for i, row in enumerate(dataset.rows) if int(row["class_label"]) == 1]
         if len(self.real_indices) != len(self.fake_indices):
             raise ValueError(
-                f"Phase 2A requires balanced Real/Fake rows, got "
+                f"selected model requires balanced Real/Fake rows, got "
                 f"{len(self.real_indices)}/{len(self.fake_indices)}"
             )
         if len(self.real_indices) % self.num_replicas:

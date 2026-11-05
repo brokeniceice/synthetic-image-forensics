@@ -1,36 +1,36 @@
-# Checkpoints
+# Model loading and packaging
 
-The final system combines separately selected components. It does not replace the P1 decoder with the original GLaMM or C1 decoder.
+End users load one Hugging Face model repository:
 
-| Local asset | Role |
-|---|---|
-| `checkpoints/GLaMM-FullScope/` | GLaMM base model and tokenizer, before the project P1/C1 adaptation |
-| `checkpoints/clip-vit-large-patch14-336/` | Shared Hugging Face CLIP vision tower and processor |
-| `checkpoints/rine.pt` | Selected frozen RINE head (`rine_state_dict`) |
-| `checkpoints/c1.pt` | C1 epoch 5 / optimizer step 2500 module checkpoint |
-| `checkpoints/p1_sam_runtime.pt` | Frozen P1 prompt encoder and mask decoder |
-| `checkpoints/r1.pt` | Final NoRelative R1, seed 3407, Joint epoch 8 |
-| `checkpoints/forensic_source.pt` | Selected dense forensic adapter, epoch 4 |
-| `checkpoints/spatial.pt` | Portable bundle assembled from the preceding three spatial assets |
-
-Trained checkpoint SHA-256 identifiers are in `configs/paper/protocol.json`. Inference checks the C1 and RINE identities, and bundle assembly checks the final R1 and forensic source identities. The P1 runtime records the P1 parent checkpoint hash.
-
-## Assemble the spatial bundle
-
-```bash
-python scripts/package_spatial.py \
-  --r1 checkpoints/r1.pt \
-  --p1-runtime checkpoints/p1_sam_runtime.pt \
-  --forensic-source checkpoints/forensic_source.pt \
-  --gamma 0.01 --output checkpoints/spatial.pt
+```python
+from forensics.runtime import Runtime
+runtime = Runtime.from_pretrained("broken-ice/synthetic-image-forensics", device="cuda:0")
 ```
 
-This packs learned tensors without optimization. The utility checkpoint already includes its frozen source heads and temperature buffers. The rectifier uses eight attention heads and locality sigma 0.25.
+The same call accepts a downloaded local directory. The inference CLI uses `--model broken-ice/synthetic-image-forensics`; no separate checkpoint assembly is required. The loader uses `huggingface_hub.snapshot_download`, resolves packaged file paths and verifies the selected model identities. It does not execute remote Python code.
+
+## Package layout
+
+```text
+config.json          # model format, fixed inference protocol and checksums
+forensics.pt         # C1, RINE and selected spatial tensors
+base_model/          # exact GLaMM base model/tokenizer snapshot
+clip/                # exact CLIP model/processor snapshot
+README.md
+LICENSE
+NOTICE
+```
+
+The combined weights preserve every tensor's name, dtype and value. Optimizer state and development metadata are omitted. LoRA is kept as an adapter computation to preserve the BF16 inference arithmetic.
+
+The final model combines C1 epoch 5 / step 2500, the frozen P1 prompt/mask decoder, the selected dense forensic adapter and NoRelative spatial correction at Joint epoch 8. `configs/paper/protocol.json` records source SHA-256 identities; `configs/paper/base_assets.json` records the exact base snapshots.
 
 ## P1 decoder provenance
 
-P1 and C1 are separate branches initialized from the same pre-P1 GLaMM state. P1 is trained with the phrase-aligned recipe in `configs/phase3a_p1.yaml`; its selected checkpoint is epoch 7 / step 3500. C1 uses `configs/phase6d3_c1_rine_conditioned_p1.yaml`; the historical `p1` suffix in that filename refers to the training recipe, not initialization from a trained P1 checkpoint.
+P1 and C1 are separate branches from the same pre-adaptation GLaMM initialization. P1 supplies the decoder, while C1 supplies scores, explanation text and projected language queries. The P1 decoder is not the original GLaMM decoder or the decoder learned by C1.
 
-The prompt encoder starts from GLaMM and receives any P1 checkpoint overrides. All P1 mask-decoder tensors are taken from the selected P1 checkpoint. `training/phase4f_prepare.py::extract_runtime` contains this extraction logic. The resulting prompt/mask path stays frozen through all final R1 stages and inference. C1 supplies the projected language queries.
+P1 is selected at epoch 7 / step 3500 using VAL loss. Its prompt encoder starts from GLaMM with any P1 overrides; the mask decoder is taken from P1. Both stay frozen throughout final spatial training and inference. The corresponding recipe is `configs/p1_decoder.yaml`; extraction is implemented in `training/extract_decoder.py`.
 
-Checkpoint files and dataset images are not committed to Git. This code snapshot does not yet provide trained-weight download links. Upstream weights retain their original licenses and access requirements.
+## Maintainer export
+
+`scripts/export_model.py` verifies the selected source checkpoints, removes optimizer state, packs project tensors and copies the exact base snapshots into the repository layout above. This is a release-maintenance step, not a requirement for users running inference. The model package must be exported and checked before uploading to Hugging Face.

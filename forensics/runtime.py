@@ -14,7 +14,7 @@ from model.SAM.utils.transforms import ResizeLongestSide
 from model.csculf import CSCULF
 from model.clip_forensic_adapter import CLIPSpatialArm
 from model.sam_forensic_rectifier import FrozenP1SAMPath, GeometryAwareSAMRectifier
-from eval.forensics_eval import GLaMMForensicsBackend
+from eval.backend import GLaMMForensicsBackend
 from forensics.checkpoints import load_c1
 from forensics.generation import (require, append_seg, expected_predictor_positions,
                                   tensor_sha, text_diagnostics)
@@ -26,7 +26,7 @@ TRAIN_CENTER = -9.190834884678093
 
 
 class Runtime:
-    def __init__(self, config, c1_checkpoint, spatial_bundle=None, device='cuda:0'):
+    def __init__(self, config, c1_checkpoint, spatial_bundle=None, device='cuda:0', *, packed_weights=None):
         self.device = torch.device(device)
         require(self.device.type == 'cuda', 'BF16 inference requires a CUDA device')
         torch.cuda.set_device(self.device)
@@ -35,9 +35,11 @@ class Runtime:
         torch.cuda.manual_seed_all(3407)
         torch.backends.cudnn.benchmark = False
         torch.backends.cudnn.deterministic = True
-        self.cfg = yaml.safe_load(Path(config).read_text())
+        self.cfg = copy.deepcopy(config) if isinstance(config, dict) else yaml.safe_load(Path(config).read_text())
         conv.default_conversation = conv.conv_templates['llava_v1']
-        self.model, self.tokenizer, self.identity = load_c1(self.cfg, c1_checkpoint, self.device)
+        self.model, self.tokenizer, self.identity = load_c1(self.cfg, c1_checkpoint, self.device,
+            rine_payload=packed_weights['rine'] if packed_weights else None,
+            source_hashes=packed_weights['source_hashes'] if packed_weights else None)
         self.owner = self.model.evaluate.__self__
         require(self.owner is self.model.get_base_model(), 'Wrong generation owner')
         require(self.owner.forensic_evidence_token_count == 1 and self.owner.token_strategy == 'fixed_cls_query', 'C1 token strategy drift')
@@ -51,9 +53,9 @@ class Runtime:
         require(getattr(self.base_generation, 'repetition_penalty', 1.0) == 1.0 and getattr(self.base_generation, 'no_repeat_ngram_size', 0) == 0, 'Unexpected repetition constraint')
         self.control_ids = [self.owner.real_token_idx, self.owner.cls_token_idx, self.owner.fake_token_idx]
         require(len(set(self.control_ids)) == 3 and self.owner.seg_token_idx not in self.control_ids and self.tokenizer.eos_token_id not in self.control_ids, 'Invalid suppression tokens')
-        self.spatial_ready = spatial_bundle is not None
-        if spatial_bundle is not None:
-            selected = torch.load(spatial_bundle, map_location='cpu', weights_only=False)
+        self.spatial_ready = spatial_bundle is not None or packed_weights is not None
+        if self.spatial_ready:
+            selected = packed_weights['spatial'] if packed_weights is not None else torch.load(spatial_bundle, map_location='cpu', weights_only=False)
             require(selected['schema'] == 'paper_spatial_bundle_v1', 'Unknown spatial bundle')
             require(selected['c1_sha256'] == self.identity['c1_sha256'], 'C1/spatial checkpoint linkage mismatch')
             expected = json.loads((Path(__file__).resolve().parents[1] / 'configs/paper/protocol.json').read_text())['checkpoint_sha256']
@@ -116,7 +118,7 @@ class Runtime:
             import torch
             from model.llava.model.language_model.llava_llama import LlavaLlamaForCausalLM
             from tools.utils import IMAGE_TOKEN_INDEX
-            require(self.spatial_ready, 'Localization/explanation require --spatial-bundle')
+            require(self.spatial_ready, 'Localization requires a complete model package')
             spec = TASKS[task]; sample = self.sample(row)
             batch = self.backend._batch_many([sample], '[FAKE]', question=spec['question'], continue_assistant=True)
             prompt = batch['input_ids'][0].cpu().tolist()
@@ -177,12 +179,12 @@ class Runtime:
 
     def native(self, sample, qvalues):
             import torch
-            from model.pcerf import sam_lowres_to_original_normalized as align
+            from model.evidence import sam_lowres_to_original_normalized as align
             from forensics import spatial as hc, spatial as ha
             from forensics.spatial import clip_grid
-            from tools.phase3c1 import geometry_for
-            from tools.phase4e1 import sam_coordinates, clip_coordinates
-            from tools.phase4c_b import inverse_sam_logits
+            from tools.geometry import geometry_for
+            from tools.spatial_metrics import sam_coordinates, clip_coordinates
+            from tools.masks import inverse_sam_logits
             device = self.device; hw = tuple(sample['label'].shape)
             raw = self.model.get_grounding_encoder_embs(sample['grounding_enc_image'][None].to(device, dtype=torch.bfloat16))
             ct, _ = self.model.get_model().get_vision_tower()(sample['global_enc_image'][None].to(device, dtype=torch.bfloat16))
@@ -210,7 +212,7 @@ class Runtime:
 
     @torch.inference_mode()
     def explain(self, row):
-        import eval.forensics_eval as evaluation
+        import eval.backend as evaluation
         question = TASKS['explanation']['question']
         sample = self.sample(row)
         sample['questions'] = [question]
@@ -221,8 +223,7 @@ class Runtime:
             evaluation.UNIFIED_FORENSICS_QUESTION = question
             self.backend.max_new_tokens = 512
             self.model.generation_config.do_sample = False
-            out = self.backend.generate_localization_batch(
-                [sample], provide_gt_fake=False, generation_mode='joint')[0]
+            out = self.backend.generate_explanation_batch([sample])[0]
         finally:
             evaluation.UNIFIED_FORENSICS_QUESTION = old_question
             self.backend.max_new_tokens = old_budget
@@ -234,3 +235,26 @@ class Runtime:
             prompt=question, prompt_token_ids=out['prompt_token_ids'],
             generation_mode='G0_autonomous_E03', budget=512,
             inference_condition='no GT verdict prefix; no control-token suppression')
+
+    @classmethod
+    def from_pretrained(cls, model_id_or_path, *, revision=None, device='cuda:0', local_files_only=False):
+        from forensics.checkpoints import file_sha256
+        directory = Path(model_id_or_path).expanduser()
+        if not directory.is_dir():
+            from huggingface_hub import snapshot_download
+            directory = Path(snapshot_download(repo_id=str(model_id_or_path), revision=revision,
+                                              local_files_only=local_files_only))
+        manifest = json.loads((directory / 'config.json').read_text())
+        require(manifest['model_type'] == 'synthetic_image_forensics' and manifest['format_version'] == 1, 'Unsupported model package')
+        require(file_sha256(directory / 'forensics.pt') == manifest['weights_sha256'], 'Model package checksum mismatch')
+        expected_protocol = json.loads((Path(__file__).resolve().parents[1] / 'configs/paper/protocol.json').read_text())
+        require(manifest['protocol'] == expected_protocol, 'Model package protocol differs from the paper model')
+        weights = torch.load(directory / 'forensics.pt', map_location='cpu', weights_only=False)
+        require(weights['source_hashes'] == expected_protocol['checkpoint_sha256'], 'Model package source identity mismatch')
+        config = manifest['backbone_config']
+        config['model']['version'] = str(directory / 'base_model')
+        config['model']['vision_tower'] = str(directory / 'clip')
+        runtime = cls(config, weights['c1'], device=device, packed_weights=weights)
+        runtime.identity['model_package'] = str(directory)
+        runtime.identity['package_weights_sha256'] = manifest['weights_sha256']
+        return runtime

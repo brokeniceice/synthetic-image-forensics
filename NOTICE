@@ -7,8 +7,9 @@ Segment Anything: https://github.com/facebookresearch/segment-anything
 RINE: https://github.com/mever-team/rine
   The adapted RINE topology records upstream commit
   9b7fd5857cc205d0412be6aeee0d7611b95bd620 in model/rine_on_c1.py.
-MMDetection: https://github.com/open-mmlab/mmdetection
-  The inherited vendored package reports version 2.22.0.
+OpenMMLab ROI extractor: https://github.com/open-mmlab/mmdetection
+  model/roi_extractor.py retains the original BaseRoIExtractor from the
+  inherited MMDetection 2.22.0 package, including its copyright header.
 
 Project-specific code is provided under the root Apache-2.0 license.
 Upstream components, pretrained model weights, and datasets remain subject

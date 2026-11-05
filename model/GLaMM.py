@@ -209,7 +209,7 @@ class GLaMMForCausalLM(LlavaLlamaForCausalLM):
         self.post_init()
 
     def enable_rine_conditioning(self, rine_checkpoint, *, projector_dtype=None):
-        """Install the frozen Phase6B.6 RINE-Q2 branch and trainable C1 heads.
+        """Install the frozen selected model RINE-Q2 branch and trainable C1 heads.
 
         The existing CLIP tower is shared (and remains frozen); RINE performs a
         separate deterministic forward through that tower.  Only Q2 is exposed
@@ -226,7 +226,7 @@ class GLaMMForCausalLM(LlavaLlamaForCausalLM):
         )
         vision = self.get_vision_tower().vision_tower
         self.rine_conditioner = RINEOnHFCLIP(vision)
-        payload = torch.load(rine_checkpoint, map_location="cpu", weights_only=False)
+        payload = rine_checkpoint if isinstance(rine_checkpoint, dict) else torch.load(rine_checkpoint, map_location="cpu", weights_only=False)
         self.rine_conditioner.rine.load_state_dict(payload["rine_state_dict"], strict=True)
         self.rine_conditioner.requires_grad_(False)
         self.rine_conditioner.eval()
@@ -235,14 +235,6 @@ class GLaMMForCausalLM(LlavaLlamaForCausalLM):
             self.forensic_projector.to(dtype=projector_dtype)
         self.forensic_evidence_token_count = 1
 
-    def enable_h2_classification_head(self, *, head_dtype=None):
-        """Install the frozen Phase 6D.3 C0 matched H2 classifier only."""
-        hidden = int(self.config.hidden_size)
-        self.classification_head = nn.Sequential(
-            nn.Linear(hidden, 512), nn.ReLU(), nn.Linear(512, 2)
-        )
-        if head_dtype is not None:
-            self.classification_head.to(dtype=head_dtype)
 
     def train(self, mode=True):
         super().train(mode)
@@ -431,12 +423,12 @@ class GLaMMForCausalLM(LlavaLlamaForCausalLM):
         # non-loss output and does not alter training gradients or weighting.
         loss_dict["pred_masks"] = pred_masks
         # The grounding image encoder is frozen and evaluated under no_grad.
-        # Phase 3B may reuse these exact embeddings for a second mask-only
+        # selected model may reuse these exact embeddings for a second mask-only
         # context branch on the same image, avoiding redundant SAM encoding.
         loss_dict["grounding_image_embeddings"] = (
             image_embeddings.detach() if grounding_enc_images is not None else None
         )
-        # Phase 6C.2 may cache the frozen selected-L2 teacher-forced SEG
+        # selected model may cache the frozen selected-L2 teacher-forced SEG
         # representations for the downstream R1-specific training stage.
         # This diagnostic output is detached and does not alter any loss or
         # trainable path.  Grouping remains one tensor [K_i, out_dim] per image.
@@ -793,7 +785,7 @@ class GLaMMForCausalLM(LlavaLlamaForCausalLM):
                 "scores": tuple(generation_outputs.scores),
                 "prompt_length": int(input_ids.shape[1]),
                 "max_new_tokens": int(max_tokens_new),
-                # Read-only Phase 6C.2 hook: retain the generated, ordered
+                # Read-only selected model hook: retain the generated, ordered
                 # predictor states so the frozen L2 autoregressive trajectory
                 # can be replayed through one shared R1 rectifier.  This does
                 # not alter generation or the P1/SAM mask path.

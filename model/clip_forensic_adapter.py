@@ -1,4 +1,4 @@
-"""Phase 4C-A lightweight local specialization over frozen CLIP grids."""
+"""selected model lightweight local specialization over frozen CLIP grids."""
 
 from __future__ import annotations
 
@@ -25,7 +25,7 @@ class CLIPSpatialArm(nn.Module):
                  blocks: int = 0, groups: int = 32):
         super().__init__()
         if blocks not in (0, 3):
-            raise ValueError("Phase 4C-A permits exactly 0 or 3 local blocks")
+            raise ValueError("selected model permits exactly 0 or 3 local blocks")
         self.projection = nn.Conv2d(input_channels, channels, 1)
         self.forensic_blocks = nn.Sequential(
             *(LocalForensicBlock(channels, groups) for _ in range(blocks))

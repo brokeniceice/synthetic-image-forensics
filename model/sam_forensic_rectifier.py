@@ -1,4 +1,4 @@
-"""Language-preserving dense-evidence rectification for Phase 4F."""
+"""Language-preserving dense-evidence rectification for selected model"""
 
 from __future__ import annotations
 
@@ -6,7 +6,7 @@ import torch
 import torch.nn as nn
 
 from model.SAM.modeling import MaskDecoder, PromptEncoder, TwoWayTransformer
-from model.tf_fdg import CrossAttentiveSemanticRectification
+from model.spatial_attention import CrossAttentiveSemanticRectification
 
 
 def build_prompt_encoder() -> PromptEncoder:

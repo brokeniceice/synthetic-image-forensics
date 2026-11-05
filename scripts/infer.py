@@ -12,9 +12,9 @@ sys.path.insert(0, str(ROOT))
 
 def main():
     p = argparse.ArgumentParser(description=__doc__)
-    p.add_argument('--config', default='configs/paper/c1.yaml')
-    p.add_argument('--checkpoint', default='checkpoints/c1.pt')
-    p.add_argument('--spatial-bundle', default=None)
+    p.add_argument('--model', required=True, help='Hugging Face model repository ID or downloaded model directory')
+    p.add_argument('--revision', default=None, help='Optional Hugging Face commit/tag')
+    p.add_argument('--local-files-only', action='store_true')
     p.add_argument('--task', choices=['classification', 'localization', 'explanation'], required=True)
     source = p.add_mutually_exclusive_group(required=True)
     source.add_argument('--image', type=Path)
@@ -26,8 +26,6 @@ def main():
     args = p.parse_args()
     if args.classification_batch_size < 1:
         p.error('Batch size must be positive')
-    if args.task == 'localization' and not args.spatial_bundle:
-        p.error('Localization requires --spatial-bundle and implements known-Fake conditional G1')
     if args.image:
         rows = [dict(sample_id=args.image.stem, image_path=str(args.image.resolve()))]
     else:
@@ -43,7 +41,7 @@ def main():
             p.error('Missing image: ' + row['image_path'])
     args.output.mkdir(parents=True, exist_ok=False)
     from forensics.runtime import Runtime
-    runtime = Runtime(args.config, args.checkpoint, args.spatial_bundle, args.device)
+    runtime = Runtime.from_pretrained(args.model, revision=args.revision, device=args.device, local_files_only=args.local_files_only)
     (args.output / 'run.json').write_text(json.dumps(dict(task=args.task, identity=runtime.identity,
         condition={'classification': 'canonical classification', 'localization': 'known-Fake conditional G1', 'explanation': 'autonomous G0 E03'}[args.task],
         center=args.center, classification_batch_size=args.classification_batch_size, n=len(rows)), indent=2) + '\n')

@@ -12,6 +12,6 @@ pip install mmcv-full==1.4.7 \
 pip install -r requirements.txt
 ```
 
-Keep the vendored `mmdet/` package on the repository import path; installing a newer MMDetection package can change imports and compatibility. Some CUDA/compiler combinations require compiling MMCV locally. Run all project commands from the repository root. No API key is required for the three task evaluators.
+The original ROI base class is retained in `model/roi_extractor.py`; installing MMDetection is not required. Some CUDA/compiler combinations require compiling MMCV locally. Run all project commands from the repository root. No API key is required for the three task evaluators.
 
 The listed versions match the recorded environment. A clean installation on a second machine has not yet been validated; the release checks use the existing experiment environment.

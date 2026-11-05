@@ -1,29 +1,39 @@
-# Training and selection
+# Training
 
-The source includes the training implementations and their selected configurations. Historical stage names are retained inside `training/` so that checkpoint topology and loss definitions remain traceable. Public evaluation has independent entrypoints in `scripts/`.
+Final inference uses the published Hugging Face package directly. The training code is provided separately for reproducing the training design; frozen training manifests, source-head initialization and prepared spatial caches are additional inputs.
 
-## Global classification and language branches
+## RINE
 
-1. Train the RINE head on the shared frozen CLIP tower, seed 3407. The recorded recipe uses batch 128, AdamW, learning rate 1e-3, weight decay zero and one epoch. See `training/phase6b6_rine_training.py` and `model/rine_on_c1.py`.
-2. Train P1 and C1 as separate branches from the same pre-P1 GLaMM initialization. P1 supplies the selected frozen SAM decoder; C1 supplies authenticity scores, explanations and language queries. P1 is not the parent of C1.
-3. Use `configs/phase3a_p1.yaml` and `configs/phase6d3_c1_rine_conditioned_p1.yaml`. The backbone trainer is `training/phase2a_distributed_train.py`. C1 enables `--rine-conditioned-c1 --rine-checkpoint checkpoints/rine.pt`.
+`python -m training.rine --initial-head PATH` trains RINE on the shared frozen CLIP tower using the recorded head initialization. The recipe is **torch.optim.Adam**, batch 128, learning rate 1e-3, zero weight decay, one epoch and seed 3407. The CLIP path and TRAIN/VAL manifests are explicit CLI arguments. Unified manifests use Fake=1; the loader translates to the native RINE label convention.
 
-Both P1 and C1 use LoRA rank 8, alpha 16 and dropout 0.05 on q/v projections. The recipes run 10 epochs × 500 optimizer steps, learning rate 3e-4, seed 3407, BF16, frozen language/vision backbone, and the recorded trainable heads/embeddings. Loss weights are text 1, classification 1, mask BCE 2 and mask Dice 0.5. The selected C1 is epoch 5 / step 2500; selected P1 is epoch 7 / step 3500. Select by VAL loss, without TEST or external OOD selection.
+The initialized-head asset is fixed by SHA-256. Unrelated baseline comparisons and external source-repository audits are not required by this trainer.
 
-## Dense evidence and spatial correction
+## P1 decoder and C1
 
-The final inference system needs the selected dense forensic adapter, frozen P1 prompt/mask runtime, frozen evidential source heads/temperatures, C1-projected queries and spatial feature caches. The training helpers expect these prepared inputs; they do not regenerate every historical cache automatically.
+P1 and C1 start from the same pre-adaptation GLaMM initialization as separate training branches. The P1 recipe supplies the selected decoder. C1 additionally trains with the frozen RINE condition.
 
-The final spatial training has three stages:
+```bash
+deepspeed --include localhost:0 train.py \
+  --config configs/p1_decoder.yaml --mode train
 
-1. Rectifier fitting with frozen utility/source/SAM/language paths.
-2. Utility fitting with the rectifier frozen.
-3. Joint utility/rectifier fitting, keeping the P1 SAM decoder frozen.
+deepspeed --include localhost:0 train.py \
+  --config configs/c1.yaml --mode train
+```
 
-The shared rectifier implementation is `training/phase6e3_c1_native_staged.py`. The final utility/Joint loss variant is `training/c1_submission_ablation_train.py`, arm `NoRelative`, seed 3407: segmentation plus ranking, without relative loss. Its selected Joint checkpoint is epoch 8. Geometry, gated embedding arithmetic, BCE/Dice weighting and ranking code are retained in the associated helpers and model files.
+`training/backbone.py` defines tokenizer/model construction, LoRA and optimizer groups; `training/detector.py` preserves the balanced sampler, distributed loss normalization and VAL-loss selection. The C1 recipe enables RINE automatically. An exact pre-adaptation module checkpoint can be supplied with `--initial-checkpoint`; this is distinct from `--resume`.
 
-`training/phase4f_prepare.py::extract_runtime` builds the frozen P1 decoder runtime. `scripts/package_spatial.py` assembles the selected inference components into one portable bundle.
+Both recipes use LoRA rank 8, alpha 16, dropout 0.05, q/v projections, 10 epochs × 500 optimizer steps, learning rate 3e-4, BF16 and seed 3407. Loss weights are text 1, classification 1, mask BCE 2 and mask Dice 0.5. C1 is selected at epoch 5 / step 2500; P1 at epoch 7 / step 3500.
 
-## Reproduction scope
+## Spatial correction
 
-Inference and metric interfaces are portable and accept explicit files. The reference spatial training supervisors still expect their prepared cache layouts and integrity metadata. The frozen split manifests, trained checkpoints, evidential initialization assets and prepared spatial caches are separate research assets and are not included in Git. Consequently this snapshot is not a complete one-command from-scratch training release. The source and configurations specify the training design, and the checkpoint manifest fixes the exact final model.
+```bash
+python -m training.spatial rectifier --config configs/spatial.yaml
+python -m training.spatial utility --config configs/spatial.yaml
+python -m training.spatial joint --config configs/spatial.yaml
+```
+
+The final trainer exposes only the selected NoRelative design. Rectifier fitting is followed by utility fitting and then Joint fitting of utility and rectifier. The P1 prompt/mask decoder, dense forensic source and evidential source heads stay frozen. Utility and Joint stages use segmentation plus ranking, without relative loss. The selected Joint checkpoint is epoch 8.
+
+The original sampling order, eligible C1 query population, batch filtering, optimizer settings, geometry, gate interpolation, SAM precision and mask losses are retained. Prepared inputs are supplied through `configs/spatial.yaml`: spatial features, C1 queries, utility features, DEV records, evidence heads and temperatures. The helper modules contain only data loading, final utility/ranking and the selected spatial computations.
+
+The checkpoint preparation utilities in `training/` serve maintainers and training reproduction. End users do not invoke them when loading the released model.

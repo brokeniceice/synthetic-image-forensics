@@ -3,7 +3,7 @@ from __future__ import annotations
 import torch
 import torch.nn.functional as F
 from model.csculf import CSCULF, build_comparison_features
-from model.pcerf import evidence_to_dirichlet, ecolaf_discount
+from model.evidence import evidence_to_dirichlet, ecolaf_discount
 
 def clip_grid(tokens: torch.Tensor) -> torch.Tensor:
     if tokens.ndim != 3:
@@ -52,17 +52,17 @@ def utility_forward(model, batch):
         return _utility_forward(model, batch)
 
 def gate_to_sam_grid(utility64: torch.Tensor, sam_coordinates: torch.Tensor) -> torch.Tensor:
-    """Sample original-normalized U_F at Phase4F SAM-token coordinates."""
+    """Sample original-normalized U_F at spatial rectification SAM-token coordinates."""
     grid = (2.0 * sam_coordinates.float() - 1.0).reshape(utility64.shape[0], 64, 64, 2)
     value = F.grid_sample(utility64.float(), grid, mode="bilinear", padding_mode="zeros", align_corners=False)
     return value.clamp(0.0, 1.0)
 
-def gated_embedding(s64: torch.Tensor, phase4f: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
+def gated_embedding(s64: torch.Tensor, corrected: torch.Tensor, gate: torch.Tensor) -> torch.Tensor:
     """S64 + g*Delta_F with exact representable endpoints."""
     if gate.shape != (s64.shape[0], 1, 64, 64):
         raise ValueError("aligned gate must be [B,1,64,64]")
-    mixed = (s64.float() + gate.float() * (phase4f.float() - s64.float())).to(s64.dtype)
+    mixed = (s64.float() + gate.float() * (corrected.float() - s64.float())).to(s64.dtype)
     mixed = torch.where(gate == 0, s64, mixed)
-    mixed = torch.where(gate == 1, phase4f, mixed)
+    mixed = torch.where(gate == 1, corrected, mixed)
     return mixed
 

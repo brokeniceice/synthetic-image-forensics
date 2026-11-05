@@ -3,7 +3,7 @@ from pathlib import Path
 import hashlib
 import json
 import torch
-import train as glamm_train
+from training import backbone as glamm_train
 
 
 def file_sha256(path):
@@ -36,13 +36,19 @@ def configure_args(config):
     return args
 
 
-def load_c1(config, checkpoint, device):
+def load_c1(config, checkpoint, device, *, rine_payload=None, source_hashes=None):
     expected = json.loads((Path(__file__).resolve().parents[1] / 'configs/paper/protocol.json').read_text())['checkpoint_sha256']
-    observed_c1 = file_sha256(checkpoint)
-    if observed_c1 != expected['c1']:
-        raise ValueError('C1 checkpoint differs from the final paper asset')
-    if file_sha256(config['forensics']['rine_checkpoint']) != expected['rine']:
-        raise ValueError('RINE checkpoint differs from the final paper asset')
+    packed = isinstance(checkpoint, dict)
+    if packed:
+        if source_hashes is None or source_hashes['c1'] != expected['c1'] or source_hashes['rine'] != expected['rine']:
+            raise ValueError('Packed model provenance differs from the final paper assets')
+        observed_c1 = source_hashes['c1']
+    else:
+        observed_c1 = file_sha256(checkpoint)
+        if observed_c1 != expected['c1']:
+            raise ValueError('C1 checkpoint differs from the final paper asset')
+        if file_sha256(config['forensics']['rine_checkpoint']) != expected['rine']:
+            raise ValueError('RINE checkpoint differs from the final paper asset')
     base_assets = json.loads((Path(__file__).resolve().parents[1] / 'configs/paper/base_assets.json').read_text())
     for group, directory in [('glamm', config['model']['version']), ('clip', config['model']['vision_tower'])]:
         for filename, digest in base_assets[group].items():
@@ -53,8 +59,8 @@ def load_c1(config, checkpoint, device):
     tokenizer = glamm_train.setup_tokenizer_and_special_tokens(args)
     model = glamm_train.initialize_model(args, tokenizer)
     model = glamm_train.prepare_model_for_training(model, tokenizer, args)
-    model.enable_rine_conditioning(Path(config['forensics']['rine_checkpoint']).resolve())
-    payload = torch.load(checkpoint, map_location='cpu', weights_only=False)
+    model.enable_rine_conditioning(rine_payload if rine_payload is not None else Path(config['forensics']['rine_checkpoint']).resolve())
+    payload = checkpoint if packed else torch.load(checkpoint, map_location='cpu', weights_only=False)
     if (int(payload.get('epoch', -1)), int(payload.get('optimizer_step', -1))) != (5, 2500):
         raise ValueError('The final C1 checkpoint must be epoch 5 / optimizer step 2500')
     missing, unexpected = model.load_state_dict(payload['module'], strict=False)

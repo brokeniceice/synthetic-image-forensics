@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from mmdet.models import BaseRoIExtractor
+from model.roi_extractor import BaseRoIExtractor
 from mmcv.cnn import ConvModule, Linear, normal_init
 
 

@@ -1,0 +1,79 @@
+experiment:
+  name: spatial_rectifier
+  seed: 3407
+  output_root: outputs/spatial
+  checkpoint_root: checkpoints/spatial
+  runtime_root: checkpoints
+p1:
+  checkpoint: checkpoints/p1.pt
+  checkpoint_sha256: fa4856f8c173c300050c3ae2149354e63a52bbced762d83fe518e9666136b326
+  base_model: checkpoints/GLaMM-FullScope
+  prompt_hash: 32f0856f718fb3e19f34b552892636fb6c2613adbae4afb8826dea89f670654d
+  hidden_extraction: hidden_at_token_immediately_preceding_last_valid_SEG_causal_predictor_before_text_hidden_fcs
+data:
+  manifest_dir: data/manifests
+  spatial_cache_root: cache/spatial
+  train_fake: 8836
+  train_valid_g0: 8690
+  val_fake: 1106
+  val_valid_g0: 1078
+  target: official_annotation_derived_per_image_all_reference_union
+evidence:
+  forensic_checkpoint: checkpoints/forensic_source.pt
+  forensic_checkpoint_sha256: 725dd44e0c867360e7a963eb13d8312187fff185849bd52de6b78d4b27a078f7
+architecture:
+  dim: 256
+  heads: 8
+  locality_sigma: 0.25
+  gamma_candidates:
+  - 0.005
+  - 0.01
+  - 0.03
+  - 0.05
+  - 0.1
+  residual_ratio_range:
+  - 0.005
+  - 0.1
+  minimum_bf16_token_survival: 0.8
+training:
+  epochs: 10
+  batch_size: 8
+  dataloader_steps_per_epoch: 1105
+  traversal_exposures: 88360
+  optimization_eligible_exposures: 86900
+optimizer:
+  name: AdamW
+  learning_rate: 5.0e-05
+  weight_decay: 0.05
+  betas:
+  - 0.9
+  - 0.999
+  warmup_fraction: 0.05
+  scheduler: cosine_decay
+  gradient_clip_norm: 1.0
+loss:
+  mask_bce_weight: 2.0
+  mask_dice_weight: 0.5
+evaluation:
+  threshold_logit: 0.0
+  bootstrap_repeats: 10000
+  bootstrap_seed: 3407
+  selector: validation_Fake_canonical_G0_mean_FG_IoU
+  selector_population: 1106
+  language_non_regression_margin: -0.01
+inputs:
+  c1_queries: cache/c1_queries
+  utility_features: cache/utility
+  dev: cache/dev
+  source_heads: checkpoints/evidence_heads.pt
+  temperatures: checkpoints/temperatures.pt
+  gamma: 0.01
+joint_training:
+  epochs: 10
+  batch_size: 8
+  learning_rate: 0.0001
+  weight_decay: 0.0001
+  gradient_clip_norm: 1.0
+  ranking_margin: 0.1
+  relative_weight: 0.0
+  ranking_weight: 1.0

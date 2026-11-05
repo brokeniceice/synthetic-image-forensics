@@ -9,3 +9,11 @@ The public evaluators were checked against the frozen predictions and masks used
 - **Packaging:** the selected spatial checkpoints load strictly into their model classes and produce a portable bundle. Core inference and training modules import successfully from an export containing only the staged release files in the recorded environment. All Python files compile; local machine paths and credential patterns were checked before publication.
 
 A fresh full GPU inference sweep and a clean installation on a separate machine have not been run for this code export. Exact tensor values can depend on the recorded CUDA/software stack and batch ordering. Weights, frozen split manifests and spatial training caches remain separate assets; see the checkpoint and training documentation.
+
+# Final-only code and Hugging Face package
+
+The code was subsequently reduced to the final architecture and functionally named training/evaluation modules. The unused detector registry, caption/region dataset loaders, alternative forensic branches, student decoder and auxiliary experiment supervisors were removed. The original ROI base implementation is retained with attribution, preserving the inherited region-encoder parameter layout.
+
+The three evaluation scripts, TRAIN-center script, frozen protocol and base-asset manifests remain byte-identical to the initially verified release. All 688 C1 tensors, 15 RINE tensors and every utility, rectifier, P1 prompt/mask decoder and dense forensic source tensor in the combined model package were compared against their source checkpoints: names, dtypes, shapes and values are identical. Base snapshots are verified by their original SHA-256 identities.
+
+A direct GPU comparison used the same device and inputs before cleanup and after loading the combined package through `Runtime.from_pretrained`. Eight classification samples produced identical scores and decisions. One localization sample produced identical generated token IDs/text, projected-query hash and binary-mask hash. The corresponding autonomous G0 explanation token IDs and text were identical. This is a representative inference regression check; it is not a new full-dataset GPU evaluation or a retraining validation.

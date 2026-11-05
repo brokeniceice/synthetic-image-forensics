@@ -336,7 +336,7 @@ class UnifiedForensicsDataset(torch.utils.data.Dataset):
         elif self.target_protocol == TARGET_PROTOCOL_PHRASE_ALIGNED:
             localization_field = self.authoritative_localization_field(row)
         else:
-            # Historical Phase 2A does not consume refs.phrase.  Keeping this
+            # Historical selected model does not consume refs.phrase.  Keeping this
             # path phrase-agnostic preserves compatibility with old manifests
             # and test fixtures that legitimately omit that optional field.
             localization_field = {

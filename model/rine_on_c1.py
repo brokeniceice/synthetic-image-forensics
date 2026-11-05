@@ -106,7 +106,7 @@ class RINEOnHFCLIP(nn.Module):
 
     def _capture_layer_norm2(self, module, inputs, output) -> None:
         del module, inputs
-        # The Phase6D.3 C1 model shares this frozen CLIP tower with the normal
+        # The selected model C1 model shares this frozen CLIP tower with the normal
         # LLaVA visual path.  Capture only the explicitly requested RINE pass;
         # retaining ordinary visual-forward activations here causes an
         # inference-time GPU memory leak without contributing to Q2.

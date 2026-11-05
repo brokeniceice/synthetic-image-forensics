@@ -150,7 +150,7 @@ class LlavaMetaForCausalLM(ABC):
                 continue
             image_token_indices = torch.where(cur_input_ids == IMAGE_TOKEN_INDEX)[0]
             if forensic_evidence_tokens is not None and image_token_indices.numel() != 1:
-                raise ValueError("Phase 4B-G evidence injection requires exactly one image token per sequence")
+                raise ValueError("selected model evidence injection requires exactly one image token per sequence")
             cur_new_input_embeds = []
             if labels is not None:
                 cur_labels = labels[batch_idx]
