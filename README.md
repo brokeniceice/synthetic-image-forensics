@@ -18,16 +18,19 @@ pip install -r requirements.txt
 
 ## Inference
 
-The complete model is downloaded automatically from [Hugging Face](https://huggingface.co/broken-ice/synthetic-image-forensics). Its frozen CLIP encoder is downloaded separately from `openai/clip-vit-large-patch14-336` at the version specified in the model configuration. Both are cached automatically; no separate checkpoint assembly is needed.
+The complete model is downloaded automatically from [Hugging Face](https://huggingface.co/broken-ice/synthetic-image-forensics). Its frozen CLIP encoder is downloaded separately at the version specified in the model configuration. Both are cached automatically.
+
+Run the joint system on one image:
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python scripts/infer.py \
   --model broken-ice/synthetic-image-forensics \
-  --task classification --image path/to/image.png \
-  --output outputs/classification
+  --image path/to/image.png --output outputs/predictions
 ```
 
-Set `--task` to `classification`, `localization` or `explanation`. Each run needs a new output directory. Results are written to `predictions.jsonl`; localization also saves binary PNG masks under `masks/`. Localization assumes the input image is synthetic.
+The system predicts image authenticity, generates an explanation, and produces the final artifact mask. The predicted class drives explanation generation; localization uses queries from that same generated explanation. Images predicted as real receive an empty artifact mask.
+
+Each record in `predictions.jsonl` contains the predicted class, explanation and mask path. Binary PNG masks are saved under `masks/`. Use a new output directory for each run.
 
 For multiple images, create a JSONL manifest with one record per line:
 
@@ -36,23 +39,35 @@ For multiple images, create a JSONL manifest with one record per line:
 {"sample_id":"example_002","image_path":"images/example_002.png"}
 ```
 
-Use unique sample IDs. Relative image paths are resolved against the manifest directory. Replace `--image ...` with `--manifest data/images.jsonl`:
+Use unique sample IDs. Relative image paths are resolved against the manifest directory.
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 python scripts/infer.py \
   --model broken-ice/synthetic-image-forensics \
-  --task localization --manifest data/images.jsonl \
-  --output outputs/localization
-
-CUDA_VISIBLE_DEVICES=0 python scripts/infer.py \
-  --model broken-ice/synthetic-image-forensics \
-  --task explanation --manifest data/images.jsonl \
-  --output outputs/explanation
+  --manifest data/images.jsonl --output outputs/predictions
 ```
 
-`--model` also accepts a downloaded model directory. Use `--revision` to select a model commit or tag. Once both the model and CLIP have been downloaded, use `--local-files-only` to run from the local cache.
+`--model` also accepts a downloaded model directory. Use `--revision` to select a model commit or tag. Once the model and CLIP are cached, use `--local-files-only` to run offline. `--max-new-tokens` sets the explanation length limit (default: 400).
 
 ## Evaluation
+
+Use `scripts/evaluate.py` to generate predictions for the three main experiments:
+
+```bash
+CUDA_VISIBLE_DEVICES=0 python scripts/evaluate.py \
+  --model broken-ice/synthetic-image-forensics --task classification \
+  --manifest data/classification.jsonl --output outputs/evaluation/classification
+
+CUDA_VISIBLE_DEVICES=0 python scripts/evaluate.py \
+  --model broken-ice/synthetic-image-forensics --task localization \
+  --manifest data/localization.jsonl --output outputs/evaluation/localization
+
+CUDA_VISIBLE_DEVICES=0 python scripts/evaluate.py \
+  --model broken-ice/synthetic-image-forensics --task explanation \
+  --manifest data/explanation.jsonl --output outputs/evaluation/explanation
+```
+
+Use the following scoring commands with the generated predictions and references.
 
 ### Classification
 
@@ -64,9 +79,9 @@ Create a label JSONL file. Use `0` for real and `1` for synthetic; sample IDs mu
 
 ```bash
 python scripts/evaluate_classification.py \
-  --predictions outputs/classification/predictions.jsonl \
+  --predictions outputs/evaluation/classification/predictions.jsonl \
   --references data/classification_labels.jsonl \
-  --output outputs/classification/metrics.json
+  --output outputs/evaluation/classification/metrics.json
 ```
 
 The evaluator reports accuracy and F1 for raw scores and the default training-set center.
@@ -79,12 +94,12 @@ Create a JSONL file pairing each predicted mask with its ground-truth mask:
 {"sample_id":"example_001","prediction_mask":"predictions/example_001.png","target_mask":"targets/example_001.png","valid_q_seg":true}
 ```
 
-Paths are relative to this manifest. Use the `mask_path` and `valid_q_seg` values from inference results, adjusting the mask path to the manifest location. Masks must have matching dimensions at the original image size; nonzero pixels represent foreground.
+Paths are relative to this manifest. Use the `mask_path` and `valid_q_seg` values from the localization evaluation predictions, adjusting the mask path to the manifest location. Masks must have matching dimensions at the original image size; nonzero pixels represent foreground.
 
 ```bash
 python scripts/evaluate_masks.py \
   --manifest data/localization_masks.jsonl \
-  --output outputs/localization/metrics.json
+  --output outputs/evaluation/localization/metrics.json
 ```
 
 The evaluator reports foreground IoU/F1 and foreground/background mIoU.
@@ -99,9 +114,9 @@ Create a reference JSONL file with the same sample IDs and ordering as the predi
 
 ```bash
 python scripts/evaluate_explanation.py \
-  --predictions outputs/explanation/predictions.jsonl \
+  --predictions outputs/evaluation/explanation/predictions.jsonl \
   --references data/explanation_references.jsonl \
-  --output outputs/explanation/metrics
+  --output outputs/evaluation/explanation/metrics
 ```
 
 The evaluator downloads its MiniLM text encoder automatically and reports CSS and ROUGE-L F1. Use a new output directory.

@@ -80,12 +80,13 @@ and explanation generation. Install the code and dependencies from
 ```bash
 CUDA_VISIBLE_DEVICES=0 python scripts/infer.py \\
   --model broken-ice/synthetic-image-forensics \\
-  --task classification --image path/to/image.png \\
-  --output outputs/classification
+  --image path/to/image.png \\
+  --output outputs/predictions
 ```
 
-Choose `classification`, `localization` or `explanation` with `--task`.
-Localization assumes a synthetic input image. Use a new output directory.
+Each prediction contains the image class, an explanation and the final artifact
+mask. Images predicted as real receive an empty artifact mask. Use a new output
+directory for each run.
 For multiple images, replace `--image ...` with `--manifest data/images.jsonl`.
 Manifest records contain `sample_id` and `image_path`; see the GitHub README
 for data formats, evaluation and training commands.

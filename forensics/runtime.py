@@ -1,8 +1,4 @@
-"""Frozen C1 classification and P1-decoder spatial inference.
-
-Localization reproduces known-Fake G1; explanation reproduces autonomous E03 G0.
-Classification uses the canonical prompt and does not require labels or masks.
-"""
+"""Joint image forensics and the three task-specific experiment paths."""
 from pathlib import Path
 import copy
 import json
@@ -126,6 +122,59 @@ class Runtime:
                 bboxes=None, conversations=[], masks=torch.zeros((1, *hw)), label=torch.full(hw, U.IGNORE_LABEL, dtype=torch.long),
                 resize=resized.shape[:2], questions=[], sampled_classes=[], cls_label=0, seg_valid=False,
                 manifest_row={'sample_id': row['sample_id'], 'explanation': ''}, source='image_only', content_category=None)
+
+    @torch.inference_mode()
+    def predict(self, row, *, center=TRAIN_CENTER, max_new_tokens=400):
+        """Classify an image, generate one explanation, and decode its final mask."""
+        import numpy as np
+        from model.llava.model.language_model.llava_llama import LlavaLlamaForCausalLM
+        from forensics.text_metrics import clean
+
+        require(self.spatial_ready, 'Joint inference requires a complete model package')
+        require(max_new_tokens > 0, 'Token budget must be positive')
+        classification = self.classify_many([row], center=center)[0]
+        prediction = classification['prediction_centered']
+        sample = self.sample(row)
+        prefix = '[FAKE]' if prediction else '[REAL]'
+        batch = self.backend._batch_many([sample], prefix, question=QUESTION, continue_assistant=True)
+        prompt = batch['input_ids'][0].cpu().tolist()
+        evidence = self.owner._rine_evidence_token(batch['global_enc_images'])
+        generation = copy.deepcopy(self.base_generation)
+        generation._from_model_config = False
+        generated = self.owner.generate(images=batch['global_enc_images'], input_ids=batch['input_ids'],
+            bboxes=batch['bboxes'], forensic_evidence_tokens=evidence, generation_config=generation,
+            do_sample=False, num_beams=1, suppress_tokens=self.control_ids,
+            max_new_tokens=max_new_tokens, output_hidden_states=False,
+            return_dict_in_generate=True, use_cache=True)
+        suffix = generated.sequences[0, len(prompt):].cpu().tolist()
+        text = clean(self.tokenizer.decode(suffix, skip_special_tokens=False))
+        truncated = len(suffix) >= max_new_tokens and suffix[-1] != self.tokenizer.eos_token_id
+        del generated
+
+        if prediction:
+            # The mask query belongs to this explanation; no second text generation.
+            replay_ids = prompt + suffix
+            if self.owner.seg_token_idx not in suffix:
+                replay_ids, _ = append_seg(prompt, suffix, seg_id=self.owner.seg_token_idx,
+                    eos_id=self.tokenizer.eos_token_id, pad_id=self.owner.config.pad_token_id)
+            sequence = torch.tensor([replay_ids], dtype=torch.long, device=self.device)
+            replay = LlavaLlamaForCausalLM.forward(self.owner, images=batch['global_enc_images'],
+                input_ids=sequence, attention_mask=sequence.ne(self.owner.config.pad_token_id),
+                output_hidden_states=True, bboxes=batch['bboxes'], forensic_evidence_tokens=evidence,
+                use_cache=False, return_dict=True)
+            queries, _ = self.owner._extract_projected_seg_predictor_hidden(replay.hidden_states, sequence)
+            q = queries[0].detach()
+            require(q.ndim == 2 and len(q) > 0 and bool(torch.isfinite(q).all()), 'Invalid artifact queries')
+            del replay, queries
+            mask = self.native(sample, q)
+        else:
+            mask = np.zeros(tuple(sample['label'].shape), dtype=bool)
+
+        result = dict(sample_id=row['sample_id'], prediction=int(prediction),
+            label='synthetic' if prediction else 'real', margin=classification['margin'],
+            score_fake=classification['score_fake'], center=classification['center'],
+            explanation=text, truncated=truncated)
+        return result, mask
 
     @torch.inference_mode()
     def infer(self, row, task):
