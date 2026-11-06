@@ -1,4 +1,4 @@
-"""Train the final rectifier, utility, and Joint spatial stages."""
+"""Train R1 through rectifier fitting, utility fitting and joint fitting."""
 from __future__ import annotations
 import argparse
 import csv
@@ -290,7 +290,7 @@ def main(argv=None):
     global CFG, OUT, CKPTS
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument('stage', choices=['rectifier', 'utility', 'joint'])
-    p.add_argument('--config', default='configs/spatial.yaml')
+    p.add_argument('--config', default='configs/r1.yaml')
     p.add_argument('--device', default='cuda:0')
     args = p.parse_args(argv)
     CFG = yaml.safe_load(Path(args.config).read_text())

@@ -1,15 +1,12 @@
 experiment:
-  name: spatial_rectifier
+  name: r1
   seed: 3407
   output_root: outputs/spatial
   checkpoint_root: checkpoints/spatial
-  runtime_root: checkpoints
-p1:
-  checkpoint: checkpoints/p1.pt
-  checkpoint_sha256: fa4856f8c173c300050c3ae2149354e63a52bbced762d83fe518e9666136b326
-  base_model: checkpoints/GLaMM-FullScope
-  prompt_hash: 32f0856f718fb3e19f34b552892636fb6c2613adbae4afb8826dea89f670654d
-  hidden_extraction: hidden_at_token_immediately_preceding_last_valid_SEG_causal_predictor_before_text_hidden_fcs
+initialization:
+  model: broken-ice/synthetic-image-forensics
+  revision: null
+  local_files_only: false
 data:
   manifest_dir: data/manifests
   spatial_cache_root: cache/spatial
@@ -18,9 +15,6 @@ data:
   val_fake: 1106
   val_valid_g0: 1078
   target: official_annotation_derived_per_image_all_reference_union
-evidence:
-  forensic_checkpoint: checkpoints/forensic_source.pt
-  forensic_checkpoint_sha256: 725dd44e0c867360e7a963eb13d8312187fff185849bd52de6b78d4b27a078f7
 architecture:
   dim: 256
   heads: 8

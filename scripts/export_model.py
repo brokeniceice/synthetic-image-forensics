@@ -14,7 +14,7 @@ CLIP = dict(repo_id='openai/clip-vit-large-patch14-336',
             revision='ce19dc912ca5cd21c8a653c79e251e808ccabcd1')
 
 
-def export_runtime(runtime, output, shard_bytes=4_000_000_000):
+def export_runtime(runtime, output, shard_bytes=500_000_000):
     from safetensors.torch import save_file
     from forensics.pretrained import is_clip_weight
     output = Path(output)

@@ -5,8 +5,9 @@ import torch
 import torch.nn.functional as F
 from model.clip_forensic_adapter import CLIPSpatialArm
 from model.sam_forensic_rectifier import FrozenP1SAMPath, GeometryAwareSAMRectifier
-from tools.masks import file_sha256, spatial_cache_paths
+from tools.masks import spatial_cache_paths
 from tools.spatial_metrics import clip_coordinates, sam_coordinates
+from training.initialization import initialization_states
 ROOT = Path(__file__).resolve().parents[1]
 
 class SpatialFeatureStore:
@@ -51,22 +52,16 @@ class SpatialFeatureStore:
         return (self.sam_features[shard][local], self.clip_features[shard][local], self.targets[shard][local])
 
 def load_sam_runtime(cfg: dict, device: torch.device) -> FrozenP1SAMPath:
-    path = Path(cfg['experiment']['runtime_root']) / 'p1_sam_runtime.pt'
-    value = torch.load(path, map_location='cpu', weights_only=False)
+    value = initialization_states(cfg)
     model = FrozenP1SAMPath()
     model.prompt_encoder.load_state_dict(value['prompt_encoder'], strict=True)
     model.mask_decoder.load_state_dict(value['mask_decoder'], strict=True)
     return model.to(device=device, dtype=torch.bfloat16).freeze()
 
 def load_evidence_source(cfg: dict, device: torch.device) -> CLIPSpatialArm:
-    path = Path(cfg['evidence']['forensic_checkpoint'])
-    if file_sha256(path) != cfg['evidence']['forensic_checkpoint_sha256']:
-        raise RuntimeError('Dense forensic checkpoint hash mismatch')
-    value = torch.load(path, map_location='cpu', weights_only=False)
-    if int(value['epoch']) != 4:
-        raise RuntimeError('Dense forensic selected epoch mismatch')
+    value = initialization_states(cfg)
     model = CLIPSpatialArm(blocks=3)
-    model.load_state_dict(value['model'], strict=True)
+    model.load_state_dict(value['forensic_source_state'], strict=True)
     return model.to(device).eval().requires_grad_(False)
 
 def evidence_feature(source: CLIPSpatialArm, raw_clip: torch.Tensor) -> torch.Tensor:

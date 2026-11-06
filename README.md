@@ -108,9 +108,11 @@ The evaluator downloads its MiniLM text encoder automatically and reports CSS an
 
 ## Training
 
-Training uses local input paths. Set model, dataset and output paths in `configs/c1.yaml`, `configs/p1_decoder.yaml` and `configs/spatial.yaml` before running. Training data and prepared feature caches are not included in the model download.
+Training consists of RINE training, C1 joint training and R1 training. Set model, dataset and output paths in `configs/c1.yaml` and `configs/r1.yaml` before running. Training data and prepared feature caches are not included in the model download.
 
 Place `train_combined.jsonl`, `val_combined.jsonl` and `test_combined.jsonl` in the configured manifest directory. Records contain `sample_id`, `forensics_domain` (`real` or `fake`), `class_label` (`0` or `1`) and `image_path` or `image_relpath`. Synthetic-image records also need `explanation` and polygon annotations in `refs`; see `dataset/forensics/unified.py` and `dataset/forensics/synthscars.py` for the annotation structure.
+
+### 1. RINE training
 
 Train the RINE head with a CLIP snapshot and an initial head checkpoint:
 
@@ -123,22 +125,23 @@ python -m training.rine \
   --output outputs/rine
 ```
 
-Set the selected RINE checkpoint path in `configs/c1.yaml`, then train the decoder and detector:
+### 2. C1 joint training
+
+Set the selected RINE checkpoint path in `configs/c1.yaml`, then jointly train the classification, language and localization components:
 
 ```bash
-deepspeed --include localhost:0 train.py \
-  --config configs/p1_decoder.yaml --mode train
-
 deepspeed --include localhost:0 train.py \
   --config configs/c1.yaml --mode train
 ```
 
-For spatial correction, configure the decoder checkpoint, evidence heads, spatial/query/utility caches and DEV records in `configs/spatial.yaml`, then run the stages in order:
+### 3. R1 training
+
+In `configs/r1.yaml`, set `initialization.model` to the published model ID or a downloaded model directory. R1 reads the frozen segmentation decoder and dense evidence source directly from these weights. Configure the evidence heads, spatial/query/utility caches and DEV records, then run rectifier fitting, utility fitting and joint fitting in order:
 
 ```bash
-python -m training.spatial rectifier --config configs/spatial.yaml
-python -m training.spatial utility --config configs/spatial.yaml
-python -m training.spatial joint --config configs/spatial.yaml
+python -m training.spatial rectifier --config configs/r1.yaml
+python -m training.spatial utility --config configs/r1.yaml
+python -m training.spatial joint --config configs/r1.yaml
 ```
 
 ## Acknowledgments

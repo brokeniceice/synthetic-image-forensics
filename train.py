@@ -1,4 +1,4 @@
-"""Train the detector/language backbone with the selected P1 or C1 recipe."""
+"""Jointly train the C1 detector, language and localization components."""
 from training.detector import main
 
 if __name__ == '__main__':

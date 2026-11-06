@@ -1,4 +1,4 @@
-"""Config-driven DeepSpeed runner for the finalized selected model baseline."""
+"""Config-driven DeepSpeed runner for C1 joint training."""
 from __future__ import annotations
 import argparse
 import hashlib
